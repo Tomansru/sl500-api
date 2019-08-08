@@ -62,7 +62,6 @@ type Sl500 struct {
 	port    *serial.Port
 	logging bool
 	open    bool
-	timeout time.Duration
 }
 
 type response struct {
@@ -70,12 +69,8 @@ type response struct {
 	err  error
 }
 
-func NewConnection(path string, baud baud, logging bool, timeout time.Duration) (Sl500, error) {
-	if timeout == 0 {
-		timeout = 3 * time.Second
-	}
-
-	c := &serial.Config{Name: path, Baud: baud.IntValue, ReadTimeout: timeout}
+func NewConnection(path string, baud baud, logging bool) (Sl500, error) {
+	c := &serial.Config{Name: path, Baud: baud.IntValue, ReadTimeout: 100 * time.Millisecond}
 	o, err := serial.OpenPort(c)
 
 	res := Sl500{}
@@ -88,7 +83,6 @@ func NewConnection(path string, baud baud, logging bool, timeout time.Duration) 
 	res.port = o
 	res.logging = logging
 	res.open = true
-	res.timeout = timeout
 
 	return res, nil
 }
@@ -331,22 +325,9 @@ func (s *Sl500) RfM1Transfer(blockNumber byte) ([]byte, error) {
 	return readResponseWithTimeout(s)
 }
 
-func timeout(timeout time.Duration, r chan response) {
-	time.Sleep(timeout)
-
-	r <- response{err: errors.New("timeout")}
-}
-
 func readResponseWithTimeout(s *Sl500) ([]byte, error) {
-	inner := make(chan response)
-
-	go func() {
-		i, v := readResponse(s)
-		inner <- response{data: i, err: v}
-	}()
-	go timeout(s.timeout, inner)
-
-	v := <-inner
+	i, err := readResponse(s)
+	v := response{data: i, err: err}
 
 	return v.data, v.err
 }
@@ -357,7 +338,7 @@ func readResponse(s *Sl500) ([]byte, error) {
 
 	totalRead := 0
 
-	for ; ; {
+	for {
 		n, err := s.port.Read(innerBuf)
 
 		if err != nil {
